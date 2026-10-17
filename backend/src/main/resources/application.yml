@@ -1,0 +1,24 @@
+spring:
+  application:
+    name: veritas-backend
+
+  datasource:
+    url: jdbc:postgresql://localhost:5433/veritas?options=-c%20TimeZone=Asia/Kolkata
+    username: veritas_app
+    password: ${POSTGRES_PASSWORD}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+  flyway:
+    enabled: true
+
+  jackson:
+    time-zone: Asia/Kolkata
+
+
+logging:
+  level:
+    org.springframework.security: DEBUG
