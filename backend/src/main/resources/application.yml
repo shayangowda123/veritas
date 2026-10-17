@@ -18,6 +18,10 @@ spring:
   jackson:
     time-zone: Asia/Kolkata
 
+security:
+  jwt:
+    secret-base64: ${SECURITY_JWT_SECRET_BASE64}
+    expiration-ms: ${SECURITY_JWT_EXPIRATION_MS}
 
 logging:
   level:

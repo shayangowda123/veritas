@@ -27,7 +27,24 @@ public class JwtService {
             @Value("${security.jwt.secret-base64}") String secretBase64,
             @Value("${security.jwt.expiration-ms}") long expirationMs
     ) {
-        byte[] keyBytes = Decoders.BASE64.decode(secretBase64);
+        if (secretBase64 == null || secretBase64.trim().isEmpty()) {
+            throw new IllegalArgumentException("JWT secret-base64 must not be empty. Please configure SECURITY_JWT_SECRET_BASE64.");
+        }
+        if (expirationMs <= 0) {
+            throw new IllegalArgumentException("JWT expiration-ms must be greater than zero. Please configure SECURITY_JWT_EXPIRATION_MS.");
+        }
+
+        byte[] keyBytes;
+        try {
+            keyBytes = Decoders.BASE64.decode(secretBase64.trim());
+        } catch (Exception ex) {
+            throw new IllegalArgumentException("JWT secret-base64 is not valid Base64: " + ex.getMessage(), ex);
+        }
+
+        if (keyBytes.length < 32) {
+            throw new IllegalArgumentException("JWT secret must be at least 256 bits (32 bytes) for HMAC-SHA256. Provided secret was " + (keyBytes.length * 8) + " bits.");
+        }
+
         this.signingKey = Keys.hmacShaKeyFor(keyBytes);
         this.expirationMs = expirationMs;
     }
@@ -73,10 +90,13 @@ public class JwtService {
             String token,
             UserDetails userDetails
     ) {
-        Claims claims = extractClaims(token);
-
-        return claims.getSubject().equals(userDetails.getUsername())
-                && claims.getExpiration().after(new Date());
+        try {
+            Claims claims = extractClaims(token);
+            return claims.getSubject().equals(userDetails.getUsername())
+                    && claims.getExpiration().after(new Date());
+        } catch (Exception ex) {
+            return false;
+        }
     }
 
     public long getExpirationSeconds() {

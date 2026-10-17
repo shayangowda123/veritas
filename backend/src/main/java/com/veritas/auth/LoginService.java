@@ -15,8 +15,6 @@ import java.util.Locale;
 @Service
 public class LoginService {
 
-    private static final long TOKEN_EXPIRATION_SECONDS = 900;
-
     private final AuthenticationManager authenticationManager;
     private final JwtService jwtService;
 
@@ -50,7 +48,7 @@ public class LoginService {
         return new LoginResponse(
                 token,
                 "Bearer",
-                TOKEN_EXPIRATION_SECONDS,
+                jwtService.getExpirationSeconds(),
                 principal.getId(),
                 principal.getUsername(),
                 principal.getRole().name()
