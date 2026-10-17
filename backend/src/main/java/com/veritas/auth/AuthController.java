@@ -1,6 +1,10 @@
+
 package com.veritas.auth;
 
+import com.veritas.auth.dto.LoginRequest;
+import com.veritas.auth.dto.LoginResponse;
 import com.veritas.otp.OtpService;
+import com.veritas.otp.dto.VerifyOtpRequest;
 import com.veritas.user.User;
 import com.veritas.user.UserService;
 import com.veritas.user.dto.RegisterUserRequest;
@@ -9,27 +13,31 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import com.veritas.otp.OtpService;
-import com.veritas.otp.dto.VerifyOtpRequest;
-import jakarta.validation.Valid;
 
 import java.util.UUID;
+
 @RestController
 @RequestMapping("/api/v1/auth")
 public class AuthController {
 
     private final UserService userService;
     private final OtpService otpService;
-    public AuthController(UserService userService, OtpService otpService) {
+    private final LoginService loginService;
+
+    public AuthController(
+            UserService userService,
+            OtpService otpService,
+            LoginService loginService
+    ) {
         this.userService = userService;
         this.otpService = otpService;
+        this.loginService = loginService;
     }
 
     @PostMapping("/register")
     public ResponseEntity<RegisterUserResponse> register(
             @Valid @RequestBody RegisterUserRequest request
     ) {
-
         User user = userService.register(request);
 
         RegisterUserResponse response = new RegisterUserResponse(
@@ -46,6 +54,12 @@ public class AuthController {
                 .body(response);
     }
 
+    @PostMapping("/login")
+    public ResponseEntity<LoginResponse> login(
+            @Valid @RequestBody LoginRequest request
+    ) {
+        return ResponseEntity.ok(loginService.login(request));
+    }
 
     @PostMapping("/verify-phone")
     public ResponseEntity<String> verifyPhone(

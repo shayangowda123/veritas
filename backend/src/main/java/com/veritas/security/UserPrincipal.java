@@ -1,5 +1,6 @@
 package com.veritas.security;
-
+import com.veritas.user.UserRole;
+import java.util.UUID;
 import com.veritas.user.User;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -53,5 +54,13 @@ public class UserPrincipal implements UserDetails {
     @Override
     public boolean isEnabled() {
         return user.isVerified();
+    }
+
+    public UUID getId() {
+        return user.getId();
+    }
+
+    public UserRole getRole() {
+        return user.getRole();
     }
 }
