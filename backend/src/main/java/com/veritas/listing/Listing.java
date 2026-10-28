@@ -1,5 +1,6 @@
 package com.veritas.listing;
 
+import com.veritas.property.FurnishingStatus;
 import com.veritas.property.Property;
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -35,14 +36,27 @@ public class Listing {
     @Column(nullable = false)
     private Integer bhk;
 
+    @Column(nullable = false)
+    private Integer bathrooms = 1;
+
     @Column(name = "built_up_area", nullable = false, precision = 10, scale = 2)
     private BigDecimal builtUpArea;
 
     @Column(nullable = false)
     private Integer floor;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "furnishing_status", nullable = false, length = 30)
+    private FurnishingStatus furnishingStatus = FurnishingStatus.UNFURNISHED;
+
     @Column(name = "bachelors_allowed", nullable = false)
     private boolean bachelorsAllowed;
+
+    @Column(name = "parking_available", nullable = false)
+    private boolean parkingAvailable;
+
+    @Column(name = "pets_allowed", nullable = false)
+    private boolean petsAllowed;
 
     @Column(name = "available_from", nullable = false)
     private LocalDate availableFrom;
@@ -52,7 +66,7 @@ public class Listing {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
-    private ListingStatus status;
+    private ListingStatus status = ListingStatus.DRAFT;
 
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;

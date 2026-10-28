@@ -104,6 +104,11 @@ public class SecurityConfig {
                                 "/api/v1/auth/verify-phone",
                                 "/error"
                         ).permitAll()
+                        .requestMatchers(org.springframework.http.HttpMethod.GET,
+                                "/api/v1/listings/{id}",
+                                "/api/v1/properties/{id}",
+                                "/api/v1/properties/{propertyId}/images/{imageId}/content"
+                        ).permitAll()
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)

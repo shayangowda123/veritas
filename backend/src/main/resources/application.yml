@@ -26,3 +26,8 @@ security:
 logging:
   level:
     org.springframework.security: DEBUG
+
+veritas:
+  storage:
+    local:
+      base-dir: ${STORAGE_LOCAL_BASE_DIR:./uploads/property-images}
