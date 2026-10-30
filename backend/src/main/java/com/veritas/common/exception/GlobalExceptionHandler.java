@@ -1,5 +1,6 @@
 package com.veritas.common.exception;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.validation.BindException;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -80,6 +81,38 @@ public class GlobalExceptionHandler {
                 .getFieldErrors()
                 .forEach(error ->
                         errors.put(error.getField(), error.getDefaultMessage())
+                );
+
+        ApiErrorResponse response = new ApiErrorResponse(
+                HttpStatus.BAD_REQUEST.value(),
+                "Validation failed",
+                OffsetDateTime.now(),
+                errors
+        );
+
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(response);
+    }
+
+    /**
+     * Handles validation and type-conversion failures raised for {@code @ModelAttribute} query
+     * bindings (for example public property discovery). Query parameters are not request-body
+     * arguments, so binding violations surface as {@link BindException} rather than
+     * {@link MethodArgumentNotValidException}. Field errors (including invalid enum, date or numeric
+     * values) are reported through the same field-to-message {@code errors} contract.
+     */
+    @ExceptionHandler(BindException.class)
+    public ResponseEntity<ApiErrorResponse> handleBindErrors(
+            BindException ex
+    ) {
+
+        Map<String, String> errors = new LinkedHashMap<>();
+
+        ex.getBindingResult()
+                .getFieldErrors()
+                .forEach(error ->
+                        errors.putIfAbsent(error.getField(), error.getDefaultMessage())
                 );
 
         ApiErrorResponse response = new ApiErrorResponse(

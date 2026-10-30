@@ -106,6 +106,7 @@ public class SecurityConfig {
                         ).permitAll()
                         .requestMatchers(org.springframework.http.HttpMethod.GET,
                                 "/api/v1/listings/{id}",
+                                "/api/v1/properties/search",
                                 "/api/v1/properties/{id}",
                                 "/api/v1/properties/{propertyId}/images/{imageId}/content"
                         ).permitAll()
