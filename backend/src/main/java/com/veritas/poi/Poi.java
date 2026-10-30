@@ -30,6 +30,33 @@ public class Poi {
     @Column(nullable = false, columnDefinition = "geography(Point,4326)")
     private Point location;
 
+    @Column(length = 100)
+    private String city;
+
+    @Column(length = 255)
+    private String locality;
+
+    @Column(columnDefinition = "TEXT")
+    private String address;
+
+    @Column(length = 50)
+    private String source;
+
+    @Column(name = "external_id", length = 255)
+    private String externalId;
+
+    @Column(name = "source_url", length = 1000)
+    private String sourceUrl;
+
+    @Column(length = 255)
+    private String licence;
+
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;
+
+    @Column(name = "updated_at")
+    private OffsetDateTime updatedAt;
+
+    @Column(name = "last_seen_at")
+    private OffsetDateTime lastSeenAt;
 }

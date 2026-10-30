@@ -6,5 +6,7 @@ public enum PoiType {
     BUS_STOP,
     HOSPITAL,
     PARK,
-    GROCERY
+    GROCERY,
+    COLLEGE,
+    METRO
 }
