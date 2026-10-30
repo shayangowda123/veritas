@@ -73,18 +73,19 @@ public class ListingService {
                 .orElseThrow(() -> new ResourceNotFoundException("Listing not found with id: " + listingId));
 
         boolean isOwner = currentUserId != null && listing.getProperty().getOwner().getId().equals(currentUserId);
+        boolean isOwnerOrAdmin = isOwner || isAdmin;
 
         // Draft listings are strictly not publicly visible
-        if (listing.getStatus() == ListingStatus.DRAFT && !isOwner && !isAdmin) {
+        if (listing.getStatus() == ListingStatus.DRAFT && !isOwnerOrAdmin) {
             throw new ResourceNotFoundException("Listing not found with id: " + listingId);
         }
 
         // Other non-published listings (e.g. archived) are only visible to the owner or admin
-        if (listing.getStatus() != ListingStatus.PUBLISHED && !isOwner && !isAdmin) {
+        if (listing.getStatus() != ListingStatus.PUBLISHED && !isOwnerOrAdmin) {
             throw new UnauthorizedActionException("Access denied: Listing is not published");
         }
 
-        return mapToResponse(listing);
+        return mapToResponse(listing, isOwnerOrAdmin);
     }
 
     @Transactional
@@ -243,7 +244,11 @@ public class ListingService {
     }
 
     public ListingResponse mapToResponse(Listing listing) {
-        PropertySummaryResponse propertySummary = propertyService.mapToSummary(listing.getProperty());
+        return mapToResponse(listing, true);
+    }
+
+    public ListingResponse mapToResponse(Listing listing, boolean isOwnerOrAdmin) {
+        PropertySummaryResponse propertySummary = propertyService.mapToSummary(listing.getProperty(), isOwnerOrAdmin);
 
         return new ListingResponse(
                 listing.getId(),

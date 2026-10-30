@@ -31,3 +31,14 @@ veritas:
   storage:
     local:
       base-dir: ${STORAGE_LOCAL_BASE_DIR:./uploads/property-images}
+  geocoding:
+    enabled: ${GEOCODING_ENABLED:true}
+    provider: ${GEOCODING_PROVIDER:nominatim}
+    base-url: ${GEOCODING_BASE_URL:https://nominatim.openstreetmap.org}
+    user-agent: ${GEOCODING_USER_AGENT:Veritas-Backend/1.0 (veritas-verification@veritas.local)}
+    connect-timeout-ms: ${GEOCODING_CONNECT_TIMEOUT_MS:3000}
+    read-timeout-ms: ${GEOCODING_READ_TIMEOUT_MS:5000}
+    min-interval-ms: ${GEOCODING_MIN_INTERVAL_MS:1000}
+    match-distance-meters: ${GEOCODING_MATCH_DISTANCE_METERS:200.0}
+    mismatch-distance-meters: ${GEOCODING_MISMATCH_DISTANCE_METERS:1000.0}
+    min-confidence: ${GEOCODING_MIN_CONFIDENCE:0.3}

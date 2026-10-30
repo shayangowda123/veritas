@@ -10,6 +10,8 @@ import com.veritas.user.User;
 import com.veritas.user.UserRepository;
 import com.veritas.user.UserRole;
 import com.veritas.verification.LocationVerificationStatus;
+import com.veritas.verification.geocoding.service.LocationConsistencyResult;
+import com.veritas.verification.geocoding.service.LocationConsistencyService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -44,6 +46,9 @@ class PropertyServiceTest {
 
     @Mock
     private UserRepository userRepository;
+
+    @Mock
+    private LocationConsistencyService locationConsistencyService;
 
     @InjectMocks
     private PropertyService propertyService;
@@ -91,7 +96,7 @@ class PropertyServiceTest {
     }
 
     @Test
-    @DisplayName("Should create property with valid owner and initial PENDING verification status")
+    @DisplayName("Should create property with valid owner and initial PENDING verification status even on MATCH")
     void shouldCreatePropertySuccessfully() {
         CreatePropertyRequest request = new CreatePropertyRequest(
                 "APARTMENT",
@@ -103,6 +108,8 @@ class PropertyServiceTest {
         );
 
         when(userRepository.findById(ownerId)).thenReturn(Optional.of(owner));
+        when(locationConsistencyService.checkConsistency(any(), any(), any(), any(), any()))
+                .thenReturn(LocationConsistencyResult.match(45.0, null));
         when(propertyRepository.save(any(Property.class))).thenAnswer(invocation -> {
             Property p = invocation.getArgument(0);
             p.setId(propertyId);
@@ -113,10 +120,72 @@ class PropertyServiceTest {
 
         assertNotNull(response);
         assertEquals("APARTMENT", response.getPropertyType());
+        // CRITICAL INVARIANT: Automated match never sets VERIFIED status; it remains PENDING
         assertEquals(LocationVerificationStatus.PENDING, response.getLocationVerificationStatus());
-        assertNull(response.getVerifiedAt());
+        assertNull(response.getVerifiedAt(), "verifiedAt must remain null for automated consistency matches");
+        assertEquals("AUTOMATED_GEOCODING", response.getVerificationMethod());
+        assertTrue(response.getVerificationNotes().contains("MATCH"));
         assertEquals(12.978369, response.getLatitude(), 0.0001);
         assertEquals(77.641154, response.getLongitude(), 0.0001);
+    }
+
+    @Test
+    @DisplayName("Should assign REVIEW_REQUIRED status when location consistency detects a MISMATCH")
+    void shouldSetReviewRequiredOnLocationMismatch() {
+        CreatePropertyRequest request = new CreatePropertyRequest(
+                "APARTMENT",
+                "123 Indiranagar",
+                "Indiranagar",
+                "Bengaluru",
+                12.978369,
+                77.641154
+        );
+
+        when(userRepository.findById(ownerId)).thenReturn(Optional.of(owner));
+        when(locationConsistencyService.checkConsistency(any(), any(), any(), any(), any()))
+                .thenReturn(LocationConsistencyResult.mismatch(4500.0, null));
+        when(propertyRepository.save(any(Property.class))).thenAnswer(invocation -> {
+            Property p = invocation.getArgument(0);
+            p.setId(propertyId);
+            return p;
+        });
+
+        PropertyResponse response = propertyService.createProperty(ownerId, request);
+
+        assertNotNull(response);
+        assertEquals(LocationVerificationStatus.REVIEW_REQUIRED, response.getLocationVerificationStatus());
+        assertNull(response.getVerifiedAt());
+        assertTrue(response.getVerificationNotes().contains("MISMATCH"));
+    }
+
+    @Test
+    @DisplayName("Should fail safely and preserve reviewable PENDING state if geocoding throws an exception")
+    void shouldFailSafelyWhenGeocodingFails() {
+        CreatePropertyRequest request = new CreatePropertyRequest(
+                "APARTMENT",
+                "123 Indiranagar",
+                "Indiranagar",
+                "Bengaluru",
+                12.978369,
+                77.641154
+        );
+
+        when(userRepository.findById(ownerId)).thenReturn(Optional.of(owner));
+        when(locationConsistencyService.checkConsistency(any(), any(), any(), any(), any()))
+                .thenThrow(new RuntimeException("Simulated external connection failure"));
+        when(propertyRepository.save(any(Property.class))).thenAnswer(invocation -> {
+            Property p = invocation.getArgument(0);
+            p.setId(propertyId);
+            return p;
+        });
+
+        // Property creation must not throw; it must fail safely preserving PENDING state
+        PropertyResponse response = propertyService.createProperty(ownerId, request);
+
+        assertNotNull(response);
+        assertEquals(LocationVerificationStatus.PENDING, response.getLocationVerificationStatus());
+        assertNull(response.getVerifiedAt());
+        assertTrue(response.getVerificationNotes().contains("unexpected internal error"));
     }
 
     @Test
@@ -193,15 +262,75 @@ class PropertyServiceTest {
     }
 
     @Test
-    @DisplayName("Non-owner can view property details if it has an active published listing")
+    @DisplayName("Non-owner browsing published listing receives sanitized property response omitting full address, coordinates and notes")
     void shouldAllowViewingPropertyWithPublishedListing() {
+        PropertyImage img = new PropertyImage();
+        img.setId(UUID.randomUUID());
+        img.setProperty(property);
+        img.setStorageKey("secret/path/img.jpg");
+        img.setOriginalFilename("photo.jpg");
+        img.setContentType("image/jpeg");
+        img.setFileSizeBytes(5000L);
+        img.setDisplayOrder(0);
+        img.setCreatedAt(OffsetDateTime.now());
+
         when(propertyRepository.findById(propertyId)).thenReturn(Optional.of(property));
         when(listingRepository.hasPublishedListing(propertyId)).thenReturn(true);
-        when(propertyImageRepository.findByPropertyIdOrderByDisplayOrderAsc(propertyId)).thenReturn(List.of());
+        when(propertyImageRepository.findByPropertyIdOrderByDisplayOrderAsc(propertyId)).thenReturn(List.of(img));
 
+        // Renter browsing published listing
         PropertyResponse response = propertyService.getPropertyDetails(propertyId, renterId, false);
 
         assertNotNull(response);
         assertEquals(propertyId, response.getId());
+        // PRIVACY HARDENING ASSERTIONS:
+        assertNull(response.getAddress(), "Full street address must be omitted for non-owners");
+        assertNull(response.getLatitude(), "Exact latitude must be omitted for non-owners");
+        assertNull(response.getLongitude(), "Exact longitude must be omitted for non-owners");
+        assertNull(response.getVerificationNotes(), "Internal verification notes must be omitted for non-owners");
+        assertNull(response.getVerificationMethod(), "Internal verification method must be omitted for non-owners");
+        assertNull(response.getVerifiedAt(), "Verification timestamp must be omitted for non-owners");
+        // Safe general neighborhood attributes are preserved
+        assertEquals("Indiranagar", response.getLocality());
+        assertEquals("Bengaluru", response.getCity());
+        assertEquals(LocationVerificationStatus.VERIFIED, response.getLocationVerificationStatus());
+        // Images must omit internal storage keys
+        assertEquals(1, response.getImages().size());
+        assertNull(response.getImages().get(0).getStorageKey(), "Storage keys must be omitted for non-owners");
+        assertNotNull(response.getImages().get(0).getContentUrl(), "Safe content URL must be provided");
+    }
+
+    @Test
+    @DisplayName("Property owner retains full access to exact address, coordinates, and verification notes")
+    void shouldProvideFullDetailsToAuthorizedOwner() {
+        when(propertyRepository.findById(propertyId)).thenReturn(Optional.of(property));
+        when(propertyImageRepository.findByPropertyIdOrderByDisplayOrderAsc(propertyId)).thenReturn(List.of());
+
+        PropertyResponse response = propertyService.getPropertyDetails(propertyId, ownerId, false);
+
+        assertNotNull(response);
+        assertEquals("123 Indiranagar, Bengaluru", response.getAddress());
+        assertEquals(12.978369, response.getLatitude(), 0.0001);
+        assertEquals(77.641154, response.getLongitude(), 0.0001);
+        assertEquals("SITE_AUDIT", response.getVerificationMethod());
+        assertEquals("Physically checked", response.getVerificationNotes());
+        assertNotNull(response.getVerifiedAt());
+    }
+
+    @Test
+    @DisplayName("Administrator retains full access to property verification details")
+    void shouldProvideFullDetailsToAdmin() {
+        UUID adminId = UUID.randomUUID();
+        when(propertyRepository.findById(propertyId)).thenReturn(Optional.of(property));
+        when(propertyImageRepository.findByPropertyIdOrderByDisplayOrderAsc(propertyId)).thenReturn(List.of());
+
+        PropertyResponse response = propertyService.getPropertyDetails(propertyId, adminId, true);
+
+        assertNotNull(response);
+        assertEquals("123 Indiranagar, Bengaluru", response.getAddress());
+        assertEquals(12.978369, response.getLatitude(), 0.0001);
+        assertEquals(77.641154, response.getLongitude(), 0.0001);
+        assertEquals("SITE_AUDIT", response.getVerificationMethod());
+        assertEquals("Physically checked", response.getVerificationNotes());
     }
 }

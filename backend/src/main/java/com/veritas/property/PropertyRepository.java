@@ -32,4 +32,17 @@ public interface PropertyRepository extends JpaRepository<Property, UUID> {
             @Param("location") Point location,
             @Param("radiusInMeters") double radiusInMeters
     );
+
+    @Query(value = """
+            SELECT ST_Distance(
+                ST_SetSRID(ST_MakePoint(:lon1, :lat1), 4326)::geography,
+                ST_SetSRID(ST_MakePoint(:lon2, :lat2), 4326)::geography
+            )
+            """, nativeQuery = true)
+    Double calculateGeographyDistance(
+            @Param("lon1") double lon1,
+            @Param("lat1") double lat1,
+            @Param("lon2") double lon2,
+            @Param("lat2") double lat2
+    );
 }

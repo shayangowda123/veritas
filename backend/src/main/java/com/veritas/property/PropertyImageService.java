@@ -68,7 +68,9 @@ public class PropertyImageService {
                 .orElseThrow(() -> new ResourceNotFoundException("Property not found with id: " + propertyId));
 
         boolean isOwner = currentUserId != null && property.getOwner().getId().equals(currentUserId);
-        if (!isOwner && !isAdmin) {
+        boolean isOwnerOrAdmin = isOwner || isAdmin;
+
+        if (!isOwnerOrAdmin) {
             boolean hasPublishedListing = listingRepository.hasPublishedListing(propertyId);
             if (!hasPublishedListing) {
                 throw new UnauthorizedActionException("Access denied: Property images are private");
@@ -76,7 +78,7 @@ public class PropertyImageService {
         }
 
         return propertyImageRepository.findByPropertyIdOrderByDisplayOrderAsc(propertyId).stream()
-                .map(this::mapToResponse)
+                .map(img -> mapToResponse(img, isOwnerOrAdmin))
                 .toList();
     }
 
@@ -122,11 +124,15 @@ public class PropertyImageService {
         return clean.replaceAll("[^a-zA-Z0-9._-]", "_");
     }
 
-    private PropertyImageResponse mapToResponse(PropertyImage image) {
+    public PropertyImageResponse mapToResponse(PropertyImage image) {
+        return mapToResponse(image, true);
+    }
+
+    public PropertyImageResponse mapToResponse(PropertyImage image, boolean isOwnerOrAdmin) {
         return new PropertyImageResponse(
                 image.getId(),
                 image.getProperty().getId(),
-                image.getStorageKey(),
+                isOwnerOrAdmin ? image.getStorageKey() : null,
                 image.getOriginalFilename(),
                 image.getContentType(),
                 image.getFileSizeBytes(),
