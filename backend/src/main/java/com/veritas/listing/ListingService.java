@@ -64,7 +64,8 @@ public class ListingService {
         listing.setUpdatedAt(now);
 
         Listing saved = listingRepository.save(listing);
-        return mapToResponse(saved);
+        // Owner-only action: return the authorized (privileged) view explicitly.
+        return mapToResponse(saved, true);
     }
 
     @Transactional(readOnly = true)
@@ -118,7 +119,8 @@ public class ListingService {
         listing.setUpdatedAt(OffsetDateTime.now());
 
         Listing saved = listingRepository.save(listing);
-        return mapToResponse(saved);
+        // Owner-only action: return the authorized (privileged) view explicitly.
+        return mapToResponse(saved, true);
     }
 
     @Transactional
@@ -132,7 +134,7 @@ public class ListingService {
 
         // Permitted states: DRAFT, UNAVAILABLE, RENTED
         if (listing.getStatus() == ListingStatus.PUBLISHED) {
-            return mapToResponse(listing);
+            return mapToResponse(listing, true);
         }
 
         if (listing.getStatus() == ListingStatus.ARCHIVED) {
@@ -157,7 +159,8 @@ public class ListingService {
         listing.setUpdatedAt(OffsetDateTime.now());
 
         Listing saved = listingRepository.save(listing);
-        return mapToResponse(saved);
+        // Owner-only action: return the authorized (privileged) view explicitly.
+        return mapToResponse(saved, true);
     }
 
     @Transactional
@@ -172,7 +175,7 @@ public class ListingService {
         ListingStatus currentStatus = listing.getStatus();
 
         if (currentStatus == targetStatus) {
-            return mapToResponse(listing);
+            return mapToResponse(listing, true);
         }
 
         // Validate permitted transitions
@@ -202,7 +205,8 @@ public class ListingService {
         listing.setUpdatedAt(OffsetDateTime.now());
 
         Listing saved = listingRepository.save(listing);
-        return mapToResponse(saved);
+        // Owner-only action: return the authorized (privileged) view explicitly.
+        return mapToResponse(saved, true);
     }
 
     @Transactional(readOnly = true)
@@ -213,7 +217,8 @@ public class ListingService {
         } else {
             page = listingRepository.findByOwnerId(ownerId, pageable);
         }
-        return page.map(this::mapToResponse);
+        // Caller is the authenticated owner, so listings include full authorized property detail.
+        return page.map(listing -> mapToResponse(listing, true));
     }
 
     private void validateListingCompleteness(Listing listing) {
@@ -241,10 +246,6 @@ public class ListingService {
         if (listing.getProperty() == null || listing.getProperty().getAddress() == null || listing.getProperty().getAddress().isBlank()) {
             throw new IncompleteListingException("Associated property must have a valid address to publish");
         }
-    }
-
-    public ListingResponse mapToResponse(Listing listing) {
-        return mapToResponse(listing, true);
     }
 
     public ListingResponse mapToResponse(Listing listing, boolean isOwnerOrAdmin) {

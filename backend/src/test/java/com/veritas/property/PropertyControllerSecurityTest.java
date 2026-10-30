@@ -42,8 +42,10 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -296,5 +298,139 @@ class PropertyControllerSecurityTest {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.originalFilename").value("bedroom.jpg"));
+    }
+
+    private PropertyImageResponse sanitizedImage(UUID propertyId, UUID imageId) {
+        // Mirrors PropertyService/PropertyImageService public mapping: storageKey nulled, contentUrl derived
+        return new PropertyImageResponse(
+                imageId, propertyId, null, "photo.jpg",
+                "image/jpeg", 2048L, 0, OffsetDateTime.now()
+        );
+    }
+
+    @Test
+    @DisplayName("Anonymous GET property serializes JSON with sensitive fields redacted but keeps verification status")
+    void shouldNotLeakSensitiveFieldsToAnonymousPropertyRequest() throws Exception {
+        UUID propertyId = UUID.randomUUID();
+        UUID imageId = UUID.randomUUID();
+        PropertyResponse publicResponse = new PropertyResponse(
+                propertyId, null, "Verified Owner", "APARTMENT",
+                null, "Indiranagar", "Bengaluru", null, null,
+                LocationVerificationStatus.VERIFIED, null, null, null,
+                List.of(sanitizedImage(propertyId, imageId)),
+                OffsetDateTime.now(), OffsetDateTime.now()
+        );
+
+        when(propertyService.getPropertyDetails(eq(propertyId), isNull(), eq(false)))
+                .thenReturn(publicResponse);
+
+        mockMvc.perform(get("/api/v1/properties/" + propertyId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ownerId", nullValue()))
+                .andExpect(jsonPath("$.address", nullValue()))
+                .andExpect(jsonPath("$.latitude", nullValue()))
+                .andExpect(jsonPath("$.longitude", nullValue()))
+                .andExpect(jsonPath("$.verifiedAt", nullValue()))
+                .andExpect(jsonPath("$.verificationNotes", nullValue()))
+                .andExpect(jsonPath("$.verificationMethod", nullValue()))
+                .andExpect(jsonPath("$.locality").value("Indiranagar"))
+                .andExpect(jsonPath("$.city").value("Bengaluru"))
+                .andExpect(jsonPath("$.locationVerificationStatus").value("VERIFIED"))
+                .andExpect(jsonPath("$.images[0].storageKey", nullValue()))
+                .andExpect(jsonPath("$.images[0].contentUrl").exists());
+    }
+
+    @Test
+    @DisplayName("Authenticated renter GET property is treated as public (no privileged fields)")
+    void shouldNotLeakSensitiveFieldsToRenterPropertyRequest() throws Exception {
+        UUID propertyId = UUID.randomUUID();
+        PropertyResponse publicResponse = new PropertyResponse(
+                propertyId, null, "Verified Owner", "APARTMENT",
+                null, "Indiranagar", "Bengaluru", null, null,
+                LocationVerificationStatus.VERIFIED, null, null, null,
+                List.of(), OffsetDateTime.now(), OffsetDateTime.now()
+        );
+
+        when(propertyService.getPropertyDetails(eq(propertyId), eq(renter.getId()), eq(false)))
+                .thenReturn(publicResponse);
+
+        mockMvc.perform(get("/api/v1/properties/" + propertyId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + renterToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ownerId", nullValue()))
+                .andExpect(jsonPath("$.address", nullValue()))
+                .andExpect(jsonPath("$.latitude", nullValue()))
+                .andExpect(jsonPath("$.longitude", nullValue()))
+                .andExpect(jsonPath("$.locationVerificationStatus").value("VERIFIED"));
+    }
+
+    @Test
+    @DisplayName("Owner GET property retains authorized address, coordinate and verification details")
+    void shouldSerializeFullDetailsForOwnerPropertyRequest() throws Exception {
+        UUID propertyId = UUID.randomUUID();
+        PropertyResponse ownerResponse = new PropertyResponse(
+                propertyId, owner.getId(), "Verified Owner", "APARTMENT",
+                "123 Main St", "Indiranagar", "Bengaluru", 12.97, 77.59,
+                LocationVerificationStatus.VERIFIED, OffsetDateTime.now(), "Checked on site", "SITE_VISIT",
+                List.of(), OffsetDateTime.now(), OffsetDateTime.now()
+        );
+
+        when(propertyService.getPropertyDetails(eq(propertyId), eq(owner.getId()), eq(false)))
+                .thenReturn(ownerResponse);
+
+        mockMvc.perform(get("/api/v1/properties/" + propertyId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ownerId").value(owner.getId().toString()))
+                .andExpect(jsonPath("$.address").value("123 Main St"))
+                .andExpect(jsonPath("$.latitude").value(12.97))
+                .andExpect(jsonPath("$.longitude").value(77.59))
+                .andExpect(jsonPath("$.verificationNotes").value("Checked on site"))
+                .andExpect(jsonPath("$.verificationMethod").value("SITE_VISIT"));
+    }
+
+    @Test
+    @DisplayName("Anonymous GET listing serializes nested property summary without address or coordinates")
+    void shouldNotLeakNestedPropertyDetailsInPublicListing() throws Exception {
+        UUID listingId = UUID.randomUUID();
+        UUID propertyId = UUID.randomUUID();
+        PropertySummaryResponse sanitizedSummary = new PropertySummaryResponse(
+                propertyId, "FLAT", null, "Indiranagar", "Bengaluru",
+                null, null, LocationVerificationStatus.VERIFIED, 2, OffsetDateTime.now()
+        );
+        ListingResponse listingResponse = new ListingResponse(
+                listingId, propertyId, sanitizedSummary,
+                new BigDecimal("25000.00"), new BigDecimal("100000.00"), 2, 2,
+                new BigDecimal("1100.00"), 3, null,
+                true, true, false, LocalDate.now().plusDays(7),
+                "Spacious flat", ListingStatus.PUBLISHED, OffsetDateTime.now(), OffsetDateTime.now()
+        );
+
+        when(listingService.getListingDetails(eq(listingId), isNull(), eq(false)))
+                .thenReturn(listingResponse);
+
+        mockMvc.perform(get("/api/v1/listings/" + listingId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.property.address", nullValue()))
+                .andExpect(jsonPath("$.property.latitude", nullValue()))
+                .andExpect(jsonPath("$.property.longitude", nullValue()))
+                .andExpect(jsonPath("$.property.locality").value("Indiranagar"))
+                .andExpect(jsonPath("$.property.locationVerificationStatus").value("VERIFIED"));
+    }
+
+    @Test
+    @DisplayName("Authenticated renter GET image list omits storageKey but keeps contentUrl")
+    void shouldNotLeakImageStorageKeyToRenter() throws Exception {
+        UUID propertyId = UUID.randomUUID();
+        UUID imageId = UUID.randomUUID();
+        when(propertyImageService.getImagesForProperty(eq(propertyId), eq(renter.getId()), eq(false)))
+                .thenReturn(List.of(sanitizedImage(propertyId, imageId)));
+
+        mockMvc.perform(get("/api/v1/properties/" + propertyId + "/images")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + renterToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].storageKey", nullValue()))
+                .andExpect(jsonPath("$[0].propertyId").value(propertyId.toString()))
+                .andExpect(jsonPath("$[0].contentUrl").exists());
     }
 }

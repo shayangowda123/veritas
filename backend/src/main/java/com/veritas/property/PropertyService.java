@@ -96,7 +96,8 @@ public class PropertyService {
         property.setUpdatedAt(now);
 
         Property saved = propertyRepository.save(property);
-        return mapToResponse(saved, List.of());
+        // Creator is the authenticated owner, so an authorized (privileged) view is appropriate.
+        return mapToResponse(saved, List.of(), true);
     }
 
     @Transactional(readOnly = true)
@@ -161,14 +162,17 @@ public class PropertyService {
 
     @Transactional(readOnly = true)
     public Page<PropertySummaryResponse> getOwnerProperties(UUID ownerId, Pageable pageable) {
+        // Caller is the authenticated owner, so summaries are returned with full authorized detail.
         return propertyRepository.findByOwnerId(ownerId, pageable)
                 .map(p -> mapToSummary(p, true));
     }
 
-    public PropertyResponse mapToResponse(Property property, List<PropertyImage> images) {
-        return mapToResponse(property, images, true);
-    }
-
+    /**
+     * Maps a property to its API response, redacting sensitive fields for non-authorized viewers.
+     *
+     * @param isOwnerOrAdmin must reflect the ACTUAL server-side authorization result. There is no
+     *                       privileged default: callers must resolve ownership/adminship explicitly.
+     */
     public PropertyResponse mapToResponse(Property property, List<PropertyImage> images, boolean isOwnerOrAdmin) {
         List<PropertyImageResponse> imageResponses = images.stream()
                 .map(img -> new PropertyImageResponse(
@@ -185,7 +189,8 @@ public class PropertyService {
 
         return new PropertyResponse(
                 property.getId(),
-                property.getOwner().getId(),
+                // Internal owner identifier is not part of the public contract; only authorized viewers receive it.
+                isOwnerOrAdmin ? property.getOwner().getId() : null,
                 property.getOwner().getName(),
                 property.getPropertyType(),
                 isOwnerOrAdmin ? property.getAddress() : null,
@@ -203,10 +208,11 @@ public class PropertyService {
         );
     }
 
-    public PropertySummaryResponse mapToSummary(Property property) {
-        return mapToSummary(property, true);
-    }
-
+    /**
+     * Maps a property to its summary response, redacting sensitive fields for non-authorized viewers.
+     *
+     * @param isOwnerOrAdmin must reflect the ACTUAL server-side authorization result.
+     */
     public PropertySummaryResponse mapToSummary(Property property, boolean isOwnerOrAdmin) {
         long imageCount = propertyImageRepository.countByPropertyId(property.getId());
         return new PropertySummaryResponse(

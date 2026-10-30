@@ -27,6 +27,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -87,7 +88,7 @@ class ListingServiceTest {
                 propertyId, "FLAT", "123 MG Road", "MG Road", "Bengaluru",
                 12.97, 77.59, LocationVerificationStatus.PENDING, 0, OffsetDateTime.now()
         );
-        lenient().when(propertyService.mapToSummary(any(Property.class))).thenReturn(summary);
+        lenient().when(propertyService.mapToSummary(any(Property.class), anyBoolean())).thenReturn(summary);
     }
 
     @Test
@@ -236,5 +237,49 @@ class ListingServiceTest {
         assertThrows(InvalidStateTransitionException.class, () ->
                 listingService.updateListing(listingId, ownerId, request)
         );
+    }
+
+    @Test
+    @DisplayName("Public renter viewing a published listing receives a nested summary without exact address or coordinates")
+    void shouldSanitizeNestedPropertySummaryForPublicListing() {
+        listing.setStatus(ListingStatus.PUBLISHED);
+        property.setLocationVerificationStatus(LocationVerificationStatus.VERIFIED);
+        UUID renterId = UUID.randomUUID();
+
+        // Mirrors PropertyService.mapToSummary(property, false): privacy-safe public summary
+        PropertySummaryResponse publicSummary = new PropertySummaryResponse(
+                propertyId, "FLAT", null, "MG Road", "Bengaluru",
+                null, null, LocationVerificationStatus.VERIFIED, 3, OffsetDateTime.now()
+        );
+        when(listingRepository.findById(listingId)).thenReturn(Optional.of(listing));
+        when(propertyService.mapToSummary(property, false)).thenReturn(publicSummary);
+
+        ListingResponse response = listingService.getListingDetails(listingId, renterId, false);
+
+        assertNotNull(response);
+        assertNull(response.getProperty().getAddress(), "Nested summary must not leak exact address to renters");
+        assertNull(response.getProperty().getLatitude(), "Nested summary must not leak latitude to renters");
+        assertNull(response.getProperty().getLongitude(), "Nested summary must not leak longitude to renters");
+        assertEquals("MG Road", response.getProperty().getLocality());
+        assertEquals(LocationVerificationStatus.VERIFIED, response.getProperty().getLocationVerificationStatus());
+        assertEquals(3, response.getProperty().getImageCount());
+    }
+
+    @Test
+    @DisplayName("Owner viewing their listing receives the full authorized nested property summary")
+    void shouldProvideFullNestedPropertySummaryToOwner() {
+        PropertySummaryResponse ownerSummary = new PropertySummaryResponse(
+                propertyId, "FLAT", "123 MG Road", "MG Road", "Bengaluru",
+                12.97, 77.59, LocationVerificationStatus.VERIFIED, 3, OffsetDateTime.now()
+        );
+        when(listingRepository.findById(listingId)).thenReturn(Optional.of(listing));
+        when(propertyService.mapToSummary(property, true)).thenReturn(ownerSummary);
+
+        ListingResponse response = listingService.getListingDetails(listingId, ownerId, false);
+
+        assertNotNull(response);
+        assertEquals("123 MG Road", response.getProperty().getAddress());
+        assertEquals(12.97, response.getProperty().getLatitude());
+        assertEquals(77.59, response.getProperty().getLongitude());
     }
 }

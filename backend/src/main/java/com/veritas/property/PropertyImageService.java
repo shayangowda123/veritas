@@ -59,7 +59,8 @@ public class PropertyImageService {
 
         PropertyImage saved = propertyImageRepository.save(image);
 
-        return mapToResponse(saved);
+        // Uploader is the authenticated owner, so the authorized (privileged) view is appropriate.
+        return mapToResponse(saved, true);
     }
 
     @Transactional(readOnly = true)
@@ -124,10 +125,12 @@ public class PropertyImageService {
         return clean.replaceAll("[^a-zA-Z0-9._-]", "_");
     }
 
-    public PropertyImageResponse mapToResponse(PropertyImage image) {
-        return mapToResponse(image, true);
-    }
-
+    /**
+     * Maps an image to its API response. Internal storage metadata (storageKey) is only included for
+     * authorized viewers; the public contentUrl is always derived from the safe, non-revealing path.
+     *
+     * @param isOwnerOrAdmin must reflect the ACTUAL server-side authorization result.
+     */
     public PropertyImageResponse mapToResponse(PropertyImage image, boolean isOwnerOrAdmin) {
         return new PropertyImageResponse(
                 image.getId(),

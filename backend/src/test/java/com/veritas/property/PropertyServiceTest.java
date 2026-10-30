@@ -5,6 +5,7 @@ import com.veritas.common.exception.UnauthorizedActionException;
 import com.veritas.listing.ListingRepository;
 import com.veritas.property.dto.CreatePropertyRequest;
 import com.veritas.property.dto.PropertyResponse;
+import com.veritas.property.dto.PropertySummaryResponse;
 import com.veritas.property.dto.UpdatePropertyRequest;
 import com.veritas.user.User;
 import com.veritas.user.UserRepository;
@@ -284,6 +285,7 @@ class PropertyServiceTest {
         assertNotNull(response);
         assertEquals(propertyId, response.getId());
         // PRIVACY HARDENING ASSERTIONS:
+        assertNull(response.getOwnerId(), "Internal owner id must be omitted for non-owners");
         assertNull(response.getAddress(), "Full street address must be omitted for non-owners");
         assertNull(response.getLatitude(), "Exact latitude must be omitted for non-owners");
         assertNull(response.getLongitude(), "Exact longitude must be omitted for non-owners");
@@ -309,12 +311,42 @@ class PropertyServiceTest {
         PropertyResponse response = propertyService.getPropertyDetails(propertyId, ownerId, false);
 
         assertNotNull(response);
+        assertEquals(ownerId, response.getOwnerId(), "Owner id must remain available to the authorized owner");
         assertEquals("123 Indiranagar, Bengaluru", response.getAddress());
         assertEquals(12.978369, response.getLatitude(), 0.0001);
         assertEquals(77.641154, response.getLongitude(), 0.0001);
         assertEquals("SITE_AUDIT", response.getVerificationMethod());
         assertEquals("Physically checked", response.getVerificationNotes());
         assertNotNull(response.getVerifiedAt());
+    }
+
+    @Test
+    @DisplayName("Public property summary omits exact address and coordinates but keeps locality, city and verification status")
+    void shouldSanitizePublicPropertySummary() {
+        when(propertyImageRepository.countByPropertyId(propertyId)).thenReturn(4L);
+
+        PropertySummaryResponse summary = propertyService.mapToSummary(property, false);
+
+        assertNull(summary.getAddress(), "Exact address must be omitted from public summaries");
+        assertNull(summary.getLatitude(), "Latitude must be omitted from public summaries");
+        assertNull(summary.getLongitude(), "Longitude must be omitted from public summaries");
+        assertEquals("Indiranagar", summary.getLocality());
+        assertEquals("Bengaluru", summary.getCity());
+        assertEquals(LocationVerificationStatus.VERIFIED, summary.getLocationVerificationStatus());
+        assertEquals(4, summary.getImageCount());
+    }
+
+    @Test
+    @DisplayName("Owner property summary retains exact address and coordinates")
+    void shouldProvideFullOwnerPropertySummary() {
+        when(propertyImageRepository.countByPropertyId(propertyId)).thenReturn(4L);
+
+        PropertySummaryResponse summary = propertyService.mapToSummary(property, true);
+
+        assertEquals("123 Indiranagar, Bengaluru", summary.getAddress());
+        assertEquals(12.978369, summary.getLatitude(), 0.0001);
+        assertEquals(77.641154, summary.getLongitude(), 0.0001);
+        assertEquals(LocationVerificationStatus.VERIFIED, summary.getLocationVerificationStatus());
     }
 
     @Test

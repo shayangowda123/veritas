@@ -16,6 +16,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -97,7 +98,51 @@ class PropertyImageServiceTest {
         assertNotNull(response);
         assertEquals("bedroom.jpg", response.getOriginalFilename());
         assertEquals("prop-123/image-abc.jpg", response.getStorageKey());
+        assertNotNull(response.getContentUrl(), "Authorized upload response must expose safe content URL");
         verify(storageService).store(eq(file), eq(propertyId.toString()));
+    }
+
+    @Test
+    @DisplayName("Public renter image list omits storage key but keeps content URL")
+    void shouldSanitizeImagesForPublicRenter() {
+        UUID renterId = UUID.randomUUID();
+        when(propertyRepository.findById(propertyId)).thenReturn(Optional.of(property));
+        when(listingRepository.hasPublishedListing(propertyId)).thenReturn(true);
+        when(propertyImageRepository.findByPropertyIdOrderByDisplayOrderAsc(propertyId)).thenReturn(List.of(image));
+
+        List<PropertyImageResponse> images = propertyImageService.getImagesForProperty(propertyId, renterId, false);
+
+        assertEquals(1, images.size());
+        PropertyImageResponse img = images.get(0);
+        assertNull(img.getStorageKey(), "Internal storage key must be omitted for public viewers");
+        assertEquals(imageId, img.getId());
+        assertEquals(propertyId, img.getPropertyId());
+        assertNotNull(img.getContentUrl(), "Safe content URL must be present for public viewers");
+    }
+
+    @Test
+    @DisplayName("Owner image list retains authorized storage key")
+    void shouldProvideFullImageMetadataToOwner() {
+        when(propertyRepository.findById(propertyId)).thenReturn(Optional.of(property));
+        when(propertyImageRepository.findByPropertyIdOrderByDisplayOrderAsc(propertyId)).thenReturn(List.of(image));
+
+        List<PropertyImageResponse> images = propertyImageService.getImagesForProperty(propertyId, ownerId, false);
+
+        assertEquals(1, images.size());
+        assertEquals("prop-123/image-abc.jpg", images.get(0).getStorageKey());
+        assertNotNull(images.get(0).getContentUrl());
+    }
+
+    @Test
+    @DisplayName("Non-owner cannot list images for a property without a published listing")
+    void shouldRejectImageListForNonOwnerWithoutPublishedListing() {
+        UUID renterId = UUID.randomUUID();
+        when(propertyRepository.findById(propertyId)).thenReturn(Optional.of(property));
+        when(listingRepository.hasPublishedListing(propertyId)).thenReturn(false);
+
+        assertThrows(UnauthorizedActionException.class, () ->
+                propertyImageService.getImagesForProperty(propertyId, renterId, false)
+        );
     }
 
     @Test
