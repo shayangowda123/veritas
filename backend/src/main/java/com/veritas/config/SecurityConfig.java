@@ -108,6 +108,7 @@ public class SecurityConfig {
                                 "/api/v1/listings/{id}",
                                 "/api/v1/properties/search",
                                 "/api/v1/properties/{id}",
+                                "/api/v1/properties/{propertyId}/nearby-places",
                                 "/api/v1/properties/{propertyId}/images/{imageId}/content"
                         ).permitAll()
                         .anyRequest().authenticated()
