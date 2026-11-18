@@ -215,4 +215,37 @@ class PropertySearchControllerTest {
 
         verify(propertySearchService, times(1)).search(any());
     }
+
+    @Test
+    @DisplayName("maximum page 100000 is accepted and delegated to the service")
+    void acceptsMaximumPage() throws Exception {
+        when(propertySearchService.search(any())).thenReturn(samplePage());
+        mockMvc.perform(get("/api/v1/properties/search").param("page", "100000"))
+                .andExpect(status().isOk());
+        verify(propertySearchService).search(any());
+    }
+
+    @Test
+    @DisplayName("page above the maximum 100000 is rejected through the 400 envelope")
+    void rejectsPageAboveMaximum() throws Exception {
+        mockMvc.perform(get("/api/v1/properties/search").param("page", "100001"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors.page").exists());
+    }
+
+    @Test
+    @DisplayName("negative page is rejected through the 400 envelope")
+    void rejectsNegativePage() throws Exception {
+        mockMvc.perform(get("/api/v1/properties/search").param("page", "-1"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors.page").exists());
+    }
+
+    @Test
+    @DisplayName("maximum page size 50 is still accepted")
+    void acceptsMaximumSize() throws Exception {
+        when(propertySearchService.search(any())).thenReturn(samplePage());
+        mockMvc.perform(get("/api/v1/properties/search").param("size", "50"))
+                .andExpect(status().isOk());
+    }
 }

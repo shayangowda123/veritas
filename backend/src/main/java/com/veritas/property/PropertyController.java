@@ -1,5 +1,6 @@
 package com.veritas.property;
 
+import com.veritas.common.web.OwnerPaginationGuard;
 import com.veritas.property.dto.CreatePropertyRequest;
 import com.veritas.property.dto.PropertyResponse;
 import com.veritas.property.dto.PropertySummaryResponse;
@@ -17,11 +18,17 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Set;
 import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/properties")
 public class PropertyController {
+
+    // Direct Property attributes that may be sorted on by the owner "my" endpoint. Any other value
+    // (unknown field, nested path such as owner.name, or an internal/expensive column) is rejected.
+    private static final Set<String> SORTABLE_FIELDS = Set.of(
+            "createdAt", "city", "locality", "propertyType", "locationVerificationStatus", "id");
 
     private final PropertyService propertyService;
 
@@ -58,7 +65,10 @@ public class PropertyController {
             @AuthenticationPrincipal UserPrincipal principal,
             @Valid @RequestBody UpdatePropertyRequest request
     ) {
-        PropertyResponse response = propertyService.updateProperty(id, principal.getId(), request);
+        // ADMIN flag derived server-side from the database-loaded principal (never client-supplied),
+        // matching the existing read-path pattern (Phase 3B.6E).
+        boolean isAdmin = principal.getRole() == UserRole.ADMIN;
+        PropertyResponse response = propertyService.updateProperty(id, principal.getId(), isAdmin, request);
         return ResponseEntity.ok(response);
     }
 
@@ -66,9 +76,11 @@ public class PropertyController {
     @PreAuthorize("hasRole('OWNER') or hasRole('ADMIN')")
     public ResponseEntity<Page<PropertySummaryResponse>> getMyProperties(
             @AuthenticationPrincipal UserPrincipal principal,
+            @RequestParam(name = "page", required = false) Integer requestedPage,
             @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
     ) {
-        Page<PropertySummaryResponse> page = propertyService.getOwnerProperties(principal.getId(), pageable);
+        Pageable safePageable = OwnerPaginationGuard.validateAndNormalize(pageable, requestedPage, SORTABLE_FIELDS);
+        Page<PropertySummaryResponse> page = propertyService.getOwnerProperties(principal.getId(), safePageable);
         return ResponseEntity.ok(page);
     }
 }

@@ -4,6 +4,7 @@ import com.veritas.common.exception.ResourceNotFoundException;
 import com.veritas.common.exception.UnauthorizedActionException;
 import com.veritas.listing.ListingRepository;
 import com.veritas.property.dto.PropertyImageResponse;
+import com.veritas.security.ResourceAccess;
 import com.veritas.storage.StorageService;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
@@ -35,13 +36,18 @@ public class PropertyImageService {
     }
 
     @Transactional
-    public PropertyImageResponse uploadImage(UUID propertyId, UUID ownerId, MultipartFile file) {
+    public PropertyImageResponse uploadImage(UUID propertyId, UUID actorId, boolean actorIsAdmin, MultipartFile file) {
         Property property = propertyRepository.findById(propertyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Property not found with id: " + propertyId));
 
-        if (!property.getOwner().getId().equals(ownerId)) {
-            throw new UnauthorizedActionException("You are not authorized to upload images for this property");
-        }
+        // Phase 3B.6E: ADMIN may upload images to any owner's property; an OWNER remains restricted
+        // to their own. The actor's identity is recorded only via the file/storage; property ownership
+        // is never transferred.
+        ResourceAccess.requireOwnershipOrAdmin(
+                actorIsAdmin,
+                property.getOwner().getId(),
+                actorId,
+                "You are not authorized to upload images for this property");
 
         // Store file safely in storage service (includes magic bytes, size, and traversal validation)
         String storageKey = storageService.store(file, propertyId.toString());
@@ -84,13 +90,16 @@ public class PropertyImageService {
     }
 
     @Transactional
-    public void deleteImage(UUID propertyId, UUID imageId, UUID ownerId) {
+    public void deleteImage(UUID propertyId, UUID imageId, UUID actorId, boolean actorIsAdmin) {
         PropertyImage image = propertyImageRepository.findByIdAndPropertyId(imageId, propertyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Property image not found"));
 
-        if (!image.getProperty().getOwner().getId().equals(ownerId)) {
-            throw new UnauthorizedActionException("You are not authorized to delete images from this property");
-        }
+        // Phase 3B.6E: authorization is against the owner of the image's PARENT property.
+        ResourceAccess.requireOwnershipOrAdmin(
+                actorIsAdmin,
+                image.getProperty().getOwner().getId(),
+                actorId,
+                "You are not authorized to delete images from this property");
 
         // Delete from disk/storage
         storageService.delete(image.getStorageKey());

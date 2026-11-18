@@ -54,6 +54,14 @@ public class UserService {
             throw new InvalidUserRoleException("Invalid user role");
         }
 
+        // Public self-registration may only create OWNER or RENTER accounts (Phase 3B.6E privilege-
+        // escalation hardening). ADMIN is rejected here with the existing 400 envelope and must be
+        // provisioned through a separately secured operational process, never through this endpoint.
+        // The @NotBlank DTO constraint already rejects a null/missing/blank role before this method runs.
+        if (role == UserRole.ADMIN) {
+            throw new InvalidUserRoleException("Public registration cannot create an ADMIN account");
+        }
+
         User user = new User();
 
         user.setName(request.getName().trim());

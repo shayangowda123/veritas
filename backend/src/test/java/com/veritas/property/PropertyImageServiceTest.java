@@ -93,7 +93,7 @@ class PropertyImageServiceTest {
             return img;
         });
 
-        PropertyImageResponse response = propertyImageService.uploadImage(propertyId, ownerId, file);
+        PropertyImageResponse response = propertyImageService.uploadImage(propertyId, ownerId, false, file);
 
         assertNotNull(response);
         assertEquals("bedroom.jpg", response.getOriginalFilename());
@@ -154,9 +154,55 @@ class PropertyImageServiceTest {
         when(propertyRepository.findById(propertyId)).thenReturn(Optional.of(property));
 
         assertThrows(UnauthorizedActionException.class, () ->
-                propertyImageService.uploadImage(propertyId, otherOwnerId, file)
+                propertyImageService.uploadImage(propertyId, otherOwnerId, false, file)
         );
         verifyNoInteractions(storageService);
+    }
+
+    @Test
+    @DisplayName("ADMIN can upload an image to another owner's property (Phase 3B.6E)")
+    void adminCanUploadToOthersProperty() {
+        UUID adminId = UUID.randomUUID();
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "admin-shot.jpg",
+                "image/jpeg",
+                new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF}
+        );
+
+        when(propertyRepository.findById(propertyId)).thenReturn(Optional.of(property));
+        when(storageService.store(eq(file), any())).thenReturn("prop-123/admin-shot.jpg");
+        when(propertyImageRepository.countByPropertyId(propertyId)).thenReturn(0L);
+        when(propertyImageRepository.save(any(PropertyImage.class))).thenAnswer(invocation -> {
+            PropertyImage img = invocation.getArgument(0);
+            img.setId(imageId);
+            return img;
+        });
+
+        PropertyImageResponse response = propertyImageService.uploadImage(propertyId, adminId, true, file);
+
+        assertNotNull(response);
+        assertEquals(imageId, response.getId());
+        assertEquals(propertyId, response.getPropertyId(), "image must stay attached to the ORIGINAL owner's property");
+        assertSame(owner, property.getOwner(), "upload must not transfer property ownership");
+    }
+
+    @Test
+    @DisplayName("ADMIN upload never bypasses storage validation (storage service still invoked normally)")
+    void adminUploadStillUsesStoragePipeline() {
+        UUID adminId = UUID.randomUUID();
+        MockMultipartFile file = new MockMultipartFile("file", "x.jpg", "image/jpeg", new byte[]{1});
+
+        when(propertyRepository.findById(propertyId)).thenReturn(Optional.of(property));
+        when(storageService.store(eq(file), any())).thenReturn("k");
+        when(propertyImageRepository.countByPropertyId(propertyId)).thenReturn(0L);
+        when(propertyImageRepository.save(any(PropertyImage.class))).thenReturn(image);
+
+        propertyImageService.uploadImage(propertyId, adminId, true, file);
+
+        // The ADMIN flag only bypasses the ownership comparison; the storage/record pipeline is unchanged.
+        verify(storageService).store(eq(file), eq(propertyId.toString()));
+        verify(propertyImageRepository).save(any(PropertyImage.class));
     }
 
     @Test
@@ -165,7 +211,20 @@ class PropertyImageServiceTest {
         when(propertyImageRepository.findByIdAndPropertyId(imageId, propertyId))
                 .thenReturn(Optional.of(image));
 
-        propertyImageService.deleteImage(propertyId, imageId, ownerId);
+        propertyImageService.deleteImage(propertyId, imageId, ownerId, false);
+
+        verify(storageService).delete("prop-123/image-abc.jpg");
+        verify(propertyImageRepository).delete(image);
+    }
+
+    @Test
+    @DisplayName("ADMIN can delete an image belonging to another owner's property (Phase 3B.6E)")
+    void adminCanDeleteOthersImage() {
+        UUID adminId = UUID.randomUUID();
+        when(propertyImageRepository.findByIdAndPropertyId(imageId, propertyId))
+                .thenReturn(Optional.of(image));
+
+        propertyImageService.deleteImage(propertyId, imageId, adminId, true);
 
         verify(storageService).delete("prop-123/image-abc.jpg");
         verify(propertyImageRepository).delete(image);
@@ -179,7 +238,7 @@ class PropertyImageServiceTest {
                 .thenReturn(Optional.of(image));
 
         assertThrows(UnauthorizedActionException.class, () ->
-                propertyImageService.deleteImage(propertyId, imageId, intruderId)
+                propertyImageService.deleteImage(propertyId, imageId, intruderId, false)
         );
         verify(storageService, never()).delete(any());
         verify(propertyImageRepository, never()).delete(any());

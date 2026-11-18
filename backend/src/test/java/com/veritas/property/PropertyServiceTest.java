@@ -20,12 +20,19 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.GeometryFactory;
 import org.locationtech.jts.geom.PrecisionModel;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 
 import java.time.OffsetDateTime;
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -223,7 +230,7 @@ class PropertyServiceTest {
         when(propertyRepository.findById(propertyId)).thenReturn(Optional.of(property));
         when(propertyRepository.save(any(Property.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        PropertyResponse response = propertyService.updateProperty(propertyId, ownerId, request);
+        PropertyResponse response = propertyService.updateProperty(propertyId, ownerId, false, request);
 
         assertEquals(LocationVerificationStatus.PENDING, response.getLocationVerificationStatus());
         assertNull(response.getVerifiedAt());
@@ -247,17 +254,84 @@ class PropertyServiceTest {
         when(propertyRepository.findById(propertyId)).thenReturn(Optional.of(property));
 
         assertThrows(UnauthorizedActionException.class, () ->
-                propertyService.updateProperty(propertyId, otherOwnerId, request)
+                propertyService.updateProperty(propertyId, otherOwnerId, false, request)
         );
     }
 
     @Test
-    @DisplayName("Non-owner cannot view private property without a published listing")
+    @DisplayName("ADMIN can update another owner's property (Phase 3B.6E)")
+    void adminCanUpdateOthersProperty() {
+        UUID adminId = UUID.randomUUID();
+        UpdatePropertyRequest request = new UpdatePropertyRequest(
+                "APARTMENT",
+                "456 Admin Fixed Road, Koramangala",
+                "Koramangala",
+                "Bengaluru",
+                12.935242,
+                77.624480
+        );
+
+        when(propertyRepository.findById(propertyId)).thenReturn(Optional.of(property));
+        when(propertyRepository.save(any(Property.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        PropertyResponse response = propertyService.updateProperty(propertyId, adminId, true, request);
+
+        assertEquals("456 Admin Fixed Road, Koramangala", response.getAddress());
+        assertEquals("Koramangala", response.getLocality());
+    }
+
+    @Test
+    @DisplayName("ADMIN update must NOT transfer property ownership (Phase 3B.6E)")
+    void adminUpdateDoesNotTransferOwnership() {
+        UUID adminId = UUID.randomUUID();
+        UpdatePropertyRequest request = new UpdatePropertyRequest(
+                "APARTMENT",
+                "123 Indiranagar",
+                "Indiranagar",
+                "Bengaluru",
+                12.978369,
+                77.641154
+        );
+
+        when(propertyRepository.findById(propertyId)).thenReturn(Optional.of(property));
+        when(propertyRepository.save(any(Property.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        PropertyResponse response = propertyService.updateProperty(propertyId, adminId, true, request);
+
+        // The original owner must remain the owner in both the entity and the mapped response.
+        assertSame(owner, property.getOwner(), "ADMIN update must not reassign property.owner");
+        assertEquals(ownerId, response.getOwnerId(), "response must still show the ORIGINAL owner id");
+        assertEquals("Property Owner", response.getOwnerName());
+    }
+
+    @Test
+    @DisplayName("Non-admin stranger without a role match remains rejected (fail-closed flag)")
+    void nonAdminActorRemainsRejected() {
+        UpdatePropertyRequest request = new UpdatePropertyRequest(
+                "APARTMENT",
+                "123 Indiranagar",
+                "Indiranagar",
+                "Bengaluru",
+                12.978369,
+                77.641154
+        );
+
+        when(propertyRepository.findById(propertyId)).thenReturn(Optional.of(property));
+
+        // actorIsAdmin=false must never be treated as admin by the shared helper.
+        assertThrows(UnauthorizedActionException.class, () ->
+                propertyService.updateProperty(propertyId, renterId, false, request)
+        );
+        verify(propertyRepository, never()).save(any(Property.class));
+    }
+
+    @Test
+    @DisplayName("Non-owner receives 404 (not 403) for a private property, so existence is not disclosed")
     void shouldDenyPrivatePropertyAccessToNonOwner() {
         when(propertyRepository.findById(propertyId)).thenReturn(Optional.of(property));
         when(listingRepository.hasPublishedListing(propertyId)).thenReturn(false);
 
-        assertThrows(UnauthorizedActionException.class, () ->
+        assertThrows(ResourceNotFoundException.class, () ->
                 propertyService.getPropertyDetails(propertyId, renterId, false)
         );
     }
@@ -286,6 +360,7 @@ class PropertyServiceTest {
         assertEquals(propertyId, response.getId());
         // PRIVACY HARDENING ASSERTIONS:
         assertNull(response.getOwnerId(), "Internal owner id must be omitted for non-owners");
+        assertNull(response.getOwnerName(), "Owner name (PII) must be omitted for non-owners");
         assertNull(response.getAddress(), "Full street address must be omitted for non-owners");
         assertNull(response.getLatitude(), "Exact latitude must be omitted for non-owners");
         assertNull(response.getLongitude(), "Exact longitude must be omitted for non-owners");
@@ -312,6 +387,7 @@ class PropertyServiceTest {
 
         assertNotNull(response);
         assertEquals(ownerId, response.getOwnerId(), "Owner id must remain available to the authorized owner");
+        assertEquals("Property Owner", response.getOwnerName(), "Owner name must remain available to the authorized owner");
         assertEquals("123 Indiranagar, Bengaluru", response.getAddress());
         assertEquals(12.978369, response.getLatitude(), 0.0001);
         assertEquals(77.641154, response.getLongitude(), 0.0001);
@@ -359,10 +435,127 @@ class PropertyServiceTest {
         PropertyResponse response = propertyService.getPropertyDetails(propertyId, adminId, true);
 
         assertNotNull(response);
+        assertEquals("Property Owner", response.getOwnerName(), "Owner name must remain available to an authorized admin");
         assertEquals("123 Indiranagar, Bengaluru", response.getAddress());
         assertEquals(12.978369, response.getLatitude(), 0.0001);
         assertEquals(77.641154, response.getLongitude(), 0.0001);
         assertEquals("SITE_AUDIT", response.getVerificationMethod());
         assertEquals("Physically checked", response.getVerificationNotes());
+    }
+
+    @Test
+    @DisplayName("Anonymous viewer of a published property receives no owner name and keeps existing privacy redaction")
+    void shouldRedactOwnerNameForAnonymousViewer() {
+        when(propertyRepository.findById(propertyId)).thenReturn(Optional.of(property));
+        when(listingRepository.hasPublishedListing(propertyId)).thenReturn(true);
+        when(propertyImageRepository.findByPropertyIdOrderByDisplayOrderAsc(propertyId)).thenReturn(List.of());
+
+        PropertyResponse response = propertyService.getPropertyDetails(propertyId, null, false);
+
+        // PII fix: owner name must be omitted for anonymous viewers alongside the existing redactions.
+        assertNull(response.getOwnerName(), "Owner name (PII) must be omitted for anonymous viewers");
+        assertNull(response.getOwnerId(), "Internal owner id must be omitted for anonymous viewers");
+        assertNull(response.getAddress(), "Full street address must be omitted for anonymous viewers");
+        assertNull(response.getLatitude(), "Latitude must be omitted for anonymous viewers");
+        assertNull(response.getLongitude(), "Longitude must be omitted for anonymous viewers");
+        // Safe general attributes remain visible for published properties.
+        assertEquals("Indiranagar", response.getLocality());
+        assertEquals("Bengaluru", response.getCity());
+    }
+
+    // ---- Phase 3B.4B: batched image counts (N+1 elimination) ---------------------------------
+
+    /** Test-only implementation of the grouped image-count projection. */
+    private record ImageCount(UUID propertyId, Long imageCount) implements PropertyImageCountProjection {
+        @Override
+        public UUID getPropertyId() {
+            return propertyId;
+        }
+
+        @Override
+        public Long getImageCount() {
+            return imageCount;
+        }
+    }
+
+    private Property propertyWithId(UUID id) {
+        Property p = new Property();
+        p.setId(id);
+        p.setOwner(owner);
+        p.setPropertyType("APARTMENT");
+        p.setAddress("Addr " + id);
+        p.setLocality("Indiranagar");
+        p.setCity("Bengaluru");
+        p.setLocation(geometryFactory.createPoint(new Coordinate(77.641154, 12.978369)));
+        p.setLocationVerificationStatus(LocationVerificationStatus.VERIFIED);
+        p.setCreatedAt(OffsetDateTime.now());
+        p.setUpdatedAt(OffsetDateTime.now());
+        return p;
+    }
+
+    @Test
+    @DisplayName("getOwnerProperties batches image counts in ONE grouped query (no per-row COUNT)")
+    void getOwnerPropertiesBatchesImageCounts() {
+        UUID p1 = UUID.randomUUID();
+        UUID p2 = UUID.randomUUID();
+        UUID p3 = UUID.randomUUID();
+        List<Property> props = List.of(propertyWithId(p1), propertyWithId(p2), propertyWithId(p3));
+        Pageable pageable = PageRequest.of(0, 20);
+        when(propertyRepository.findByOwnerId(ownerId, pageable))
+                .thenReturn(new PageImpl<>(props, pageable, props.size()));
+        // p1 -> 2, p2 -> 5, p3 absent from the grouped result -> 0
+        when(propertyImageRepository.countByPropertyIds(any()))
+                .thenReturn(List.of(new ImageCount(p1, 2L), new ImageCount(p2, 5L)));
+
+        Page<PropertySummaryResponse> page = propertyService.getOwnerProperties(ownerId, pageable);
+
+        assertEquals(2, page.getContent().get(0).getImageCount());
+        assertEquals(5, page.getContent().get(1).getImageCount());
+        assertEquals(0, page.getContent().get(2).getImageCount(),
+                "a property absent from the grouped result must receive a count of 0");
+        // Exactly one grouped query, and never the per-row count.
+        verify(propertyImageRepository, times(1)).countByPropertyIds(any());
+        verify(propertyImageRepository, never()).countByPropertyId(any());
+    }
+
+    @Test
+    @DisplayName("Empty owner-properties page issues no image-count query at all")
+    void emptyOwnerPropertiesPageIssuesNoImageCountQuery() {
+        Pageable pageable = PageRequest.of(0, 20);
+        when(propertyRepository.findByOwnerId(ownerId, pageable))
+                .thenReturn(new PageImpl<>(List.of(), pageable, 0));
+
+        Page<PropertySummaryResponse> page = propertyService.getOwnerProperties(ownerId, pageable);
+
+        assertTrue(page.isEmpty());
+        verify(propertyImageRepository, never()).countByPropertyIds(any());
+        verify(propertyImageRepository, never()).countByPropertyId(any());
+    }
+
+    @Test
+    @DisplayName("loadImageCounts dedupes repeated ids into a single grouped query")
+    void loadImageCountsDedupesIds() {
+        UUID a = UUID.randomUUID();
+        UUID b = UUID.randomUUID();
+        when(propertyImageRepository.countByPropertyIds(any()))
+                .thenReturn(List.of(new ImageCount(a, 3L), new ImageCount(b, 1L)));
+
+        Map<UUID, Long> counts = propertyService.loadImageCounts(List.of(a, b, a, a, b));
+
+        assertEquals(3L, counts.get(a));
+        assertEquals(1L, counts.get(b));
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Collection<UUID>> captor = ArgumentCaptor.forClass(Collection.class);
+        verify(propertyImageRepository).countByPropertyIds(captor.capture());
+        assertEquals(2, captor.getValue().size(), "duplicate ids must be collapsed before the query");
+    }
+
+    @Test
+    @DisplayName("loadImageCounts short-circuits an empty id set without querying")
+    void loadImageCountsEmptyShortCircuits() {
+        Map<UUID, Long> counts = propertyService.loadImageCounts(List.of());
+
+        assertTrue(counts.isEmpty());
+        verify(propertyImageRepository, never()).countByPropertyIds(any());
     }
 }

@@ -65,6 +65,7 @@ public class PropertySearchRequest {
     private Double radiusInMeters;
 
     @Min(value = 0, message = "page must be zero or greater")
+    @Max(value = 100000, message = "page must not exceed 100000")
     private int page = 0;
 
     @Min(value = 1, message = "size must be positive")

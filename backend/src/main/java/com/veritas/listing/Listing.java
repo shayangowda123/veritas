@@ -73,4 +73,13 @@ public class Listing {
 
     @Column(name = "updated_at", nullable = false)
     private OffsetDateTime updatedAt;
+
+    // JPA optimistic-lock token (Phase 3B.6C). Hibernate owns this value: it initialises it to 0 on
+    // persist and increments it on every UPDATE, adding the version to the write's WHERE clause so an
+    // overlapping transaction that loaded a stale row fails with an optimistic-lock exception. The
+    // service NEVER assigns or increments this field manually and never copies a client-supplied value
+    // onto the managed entity; client staleness is detected by comparing the expected version separately.
+    @Version
+    @Column(name = "version", nullable = false)
+    private Integer version;
 }

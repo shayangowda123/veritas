@@ -12,10 +12,14 @@ import java.util.UUID;
 
 public interface ListingRepository extends JpaRepository<Listing, UUID> {
 
-    @Query("SELECT l FROM Listing l WHERE l.property.owner.id = :ownerId")
+    // JOIN FETCH l.property loads the associated property in the same query. Previously the WHERE
+    // clause only navigated l.property.owner.id (an implicit join), leaving listing.property a lazy
+    // proxy that triggered one SELECT per row when building the owner's listing page (N+1). property
+    // is a ToOne association, so the fetch join does not multiply rows and pagination stays correct.
+    @Query("SELECT l FROM Listing l JOIN FETCH l.property p WHERE p.owner.id = :ownerId")
     Page<Listing> findByOwnerId(@Param("ownerId") UUID ownerId, Pageable pageable);
 
-    @Query("SELECT l FROM Listing l WHERE l.property.owner.id = :ownerId AND l.status = :status")
+    @Query("SELECT l FROM Listing l JOIN FETCH l.property p WHERE p.owner.id = :ownerId AND l.status = :status")
     Page<Listing> findByOwnerIdAndStatus(
             @Param("ownerId") UUID ownerId,
             @Param("status") ListingStatus status,

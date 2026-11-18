@@ -15,4 +15,9 @@ public class UpdateListingStatusRequest {
 
     @NotNull(message = "Status is required")
     private ListingStatus status;
+
+    // Expected optimistic-lock version the client originally received. Mandatory: missing -> HTTP 400;
+    // mismatch with the current persisted version -> HTTP 409 from the service.
+    @NotNull(message = "Version is required")
+    private Integer version;
 }

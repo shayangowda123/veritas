@@ -2,6 +2,7 @@ package com.veritas.listing.dto;
 
 import com.veritas.property.FurnishingStatus;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
@@ -20,10 +21,12 @@ public class UpdateListingRequest {
 
     @NotNull(message = "Rent is required")
     @DecimalMin(value = "1.0", message = "Rent must be greater than zero")
+    @Digits(integer = 10, fraction = 2, message = "Rent must have at most 10 integer digits and 2 decimal places")
     private BigDecimal rent;
 
     @NotNull(message = "Deposit is required")
     @DecimalMin(value = "0.0", message = "Deposit cannot be negative")
+    @Digits(integer = 10, fraction = 2, message = "Deposit must have at most 10 integer digits and 2 decimal places")
     private BigDecimal deposit;
 
     @NotNull(message = "BHK is required")
@@ -36,6 +39,7 @@ public class UpdateListingRequest {
 
     @NotNull(message = "Built-up area is required")
     @DecimalMin(value = "1.0", message = "Built-up area must be greater than zero")
+    @Digits(integer = 8, fraction = 2, message = "Built-up area must have at most 8 integer digits and 2 decimal places")
     private BigDecimal builtUpArea;
 
     @NotNull(message = "Floor is required")
@@ -65,4 +69,11 @@ public class UpdateListingRequest {
     private LocalDate availableFrom;
 
     private String description;
+
+    // Expected optimistic-lock version the client originally received. Mandatory: a missing value fails
+    // bean validation with the existing HTTP 400 envelope, and a value that does not match the current
+    // persisted version is rejected with HTTP 409 by the service. Appended last to preserve the
+    // existing constructor argument order.
+    @NotNull(message = "Version is required")
+    private Integer version;
 }

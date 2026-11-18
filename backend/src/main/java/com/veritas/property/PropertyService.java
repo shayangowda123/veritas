@@ -4,6 +4,7 @@ import com.veritas.common.exception.ResourceNotFoundException;
 import com.veritas.common.exception.UnauthorizedActionException;
 import com.veritas.listing.ListingRepository;
 import com.veritas.property.dto.*;
+import com.veritas.security.ResourceAccess;
 import com.veritas.user.User;
 import com.veritas.user.UserRepository;
 import com.veritas.user.UserRole;
@@ -22,7 +23,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -111,7 +117,11 @@ public class PropertyService {
         if (!isOwnerOrAdmin) {
             boolean hasPublishedListing = listingRepository.hasPublishedListing(propertyId);
             if (!hasPublishedListing) {
-                throw new UnauthorizedActionException("Access denied: You do not have permission to view this private property");
+                // READ visibility rule: a private property is reported as not-found to unauthorized
+                // viewers (consistent with unpublished listing reads) so its existence is not
+                // disclosed. WRITE authorization for this resource still returns 403 via
+                // UnauthorizedActionException in updateProperty.
+                throw new ResourceNotFoundException("Property not found with id: " + propertyId);
             }
         }
 
@@ -120,13 +130,17 @@ public class PropertyService {
     }
 
     @Transactional
-    public PropertyResponse updateProperty(UUID propertyId, UUID ownerId, UpdatePropertyRequest request) {
+    public PropertyResponse updateProperty(UUID propertyId, UUID actorId, boolean actorIsAdmin, UpdatePropertyRequest request) {
         Property property = propertyRepository.findById(propertyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Property not found with id: " + propertyId));
 
-        if (!property.getOwner().getId().equals(ownerId)) {
-            throw new UnauthorizedActionException("You are not authorized to modify this property");
-        }
+        // Phase 3B.6E: ADMIN may manage any owner's property; an OWNER remains restricted to their
+        // own. The shared helper centralizes the rule; ownership is NEVER transferred by this call.
+        ResourceAccess.requireOwnershipOrAdmin(
+                actorIsAdmin,
+                property.getOwner().getId(),
+                actorId,
+                "You are not authorized to modify this property");
 
         double oldLat = property.getLatitude();
         double oldLon = property.getLongitude();
@@ -162,9 +176,32 @@ public class PropertyService {
 
     @Transactional(readOnly = true)
     public Page<PropertySummaryResponse> getOwnerProperties(UUID ownerId, Pageable pageable) {
+        Page<Property> page = propertyRepository.findByOwnerId(ownerId, pageable);
+        // Batch the image counts for the entire page in ONE grouped query instead of a COUNT per row
+        // (N+1). mapToSummary does not traverse owner/publishedListing, so no other lazy loads occur.
+        Map<UUID, Long> imageCounts = loadImageCounts(
+                page.getContent().stream().map(Property::getId).toList());
         // Caller is the authenticated owner, so summaries are returned with full authorized detail.
-        return propertyRepository.findByOwnerId(ownerId, pageable)
-                .map(p -> mapToSummary(p, true));
+        return page.map(p -> mapToSummary(p, true, imageCounts.getOrDefault(p.getId(), 0L)));
+    }
+
+    /**
+     * Resolves image counts for many properties with a single grouped query. Returns a map of
+     * property id to count; a property with no images is simply absent, and callers must default it
+     * to zero. Avoids the per-row {@code countByPropertyId} N+1 pattern in paged property/listing
+     * flows. Executes no query for a null/empty id set (e.g. an empty page).
+     */
+    public Map<UUID, Long> loadImageCounts(Collection<UUID> propertyIds) {
+        if (propertyIds == null || propertyIds.isEmpty()) {
+            return Map.of();
+        }
+        // Distinct ids: the same property can back several listings; avoid redundant IN values.
+        Set<UUID> distinct = new HashSet<>(propertyIds);
+        Map<UUID, Long> counts = new HashMap<>();
+        for (PropertyImageCountProjection row : propertyImageRepository.countByPropertyIds(distinct)) {
+            counts.put(row.getPropertyId(), row.getImageCount());
+        }
+        return counts;
     }
 
     /**
@@ -191,7 +228,8 @@ public class PropertyService {
                 property.getId(),
                 // Internal owner identifier is not part of the public contract; only authorized viewers receive it.
                 isOwnerOrAdmin ? property.getOwner().getId() : null,
-                property.getOwner().getName(),
+                // Owner personal name is PII: only authorized (owner/admin) viewers receive it.
+                isOwnerOrAdmin ? property.getOwner().getName() : null,
                 property.getPropertyType(),
                 isOwnerOrAdmin ? property.getAddress() : null,
                 property.getLocality(),
@@ -210,11 +248,25 @@ public class PropertyService {
 
     /**
      * Maps a property to its summary response, redacting sensitive fields for non-authorized viewers.
+     * The image count is resolved with its own single COUNT; paged flows should instead preload counts
+     * once via {@link #loadImageCounts(java.util.Collection)} and call
+     * {@link #mapToSummary(Property, boolean, long)} to avoid N+1 queries.
      *
      * @param isOwnerOrAdmin must reflect the ACTUAL server-side authorization result.
      */
     public PropertySummaryResponse mapToSummary(Property property, boolean isOwnerOrAdmin) {
         long imageCount = propertyImageRepository.countByPropertyId(property.getId());
+        return mapToSummary(property, isOwnerOrAdmin, imageCount);
+    }
+
+    /**
+     * Maps a property to its summary response using a pre-resolved image count (no query issued).
+     *
+     * @param isOwnerOrAdmin must reflect the ACTUAL server-side authorization result.
+     * @param imageCount     image count resolved by the caller (batched for the page); properties
+     *                       absent from the batch must be passed as 0.
+     */
+    public PropertySummaryResponse mapToSummary(Property property, boolean isOwnerOrAdmin, long imageCount) {
         return new PropertySummaryResponse(
                 property.getId(),
                 property.getPropertyType(),

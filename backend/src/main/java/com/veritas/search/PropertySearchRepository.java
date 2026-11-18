@@ -36,12 +36,20 @@ public class PropertySearchRepository {
     }
 
     public Page<PropertySearchRow> search(PropertySearchCriteria criteria, Pageable pageable) {
+        // Validate the offset before narrowing to the int range JPA's setFirstResult requires. The
+        // request DTO already caps page (<=100000) and size (<=50), so this is unreachable via HTTP;
+        // it is a defensive guard against a silent long-to-int overflow if those bounds ever change.
+        long offset = pageable.getOffset();
+        if (offset > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("Requested page offset exceeds the supported range");
+        }
+
         PropertySearchQueryBuilder.BuiltQuery built = queryBuilder.build(criteria);
 
         Query contentQuery = entityManager.createNativeQuery(built.contentSql());
         built.contentParams().forEach(contentQuery::setParameter);
         contentQuery.setMaxResults(pageable.getPageSize());
-        contentQuery.setFirstResult((int) pageable.getOffset());
+        contentQuery.setFirstResult((int) offset);
 
         @SuppressWarnings("unchecked")
         List<Object[]> rows = contentQuery.getResultList();

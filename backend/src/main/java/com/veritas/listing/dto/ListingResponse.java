@@ -37,4 +37,8 @@ public class ListingResponse {
     private ListingStatus status;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
+    // Current persisted optimistic-lock version. Exposed on every listing response (create, detail,
+    // owner page, update, publish, status change) so a client can supply it back as the expected
+    // version on its next mutation. Appended last to keep existing constructor argument order.
+    private Integer version;
 }

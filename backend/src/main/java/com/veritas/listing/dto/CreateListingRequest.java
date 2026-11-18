@@ -2,6 +2,7 @@ package com.veritas.listing.dto;
 
 import com.veritas.property.FurnishingStatus;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
@@ -24,10 +25,12 @@ public class CreateListingRequest {
 
     @NotNull(message = "Rent is required")
     @DecimalMin(value = "1.0", message = "Rent must be greater than zero")
+    @Digits(integer = 10, fraction = 2, message = "Rent must have at most 10 integer digits and 2 decimal places")
     private BigDecimal rent;
 
     @NotNull(message = "Deposit is required")
     @DecimalMin(value = "0.0", message = "Deposit cannot be negative")
+    @Digits(integer = 10, fraction = 2, message = "Deposit must have at most 10 integer digits and 2 decimal places")
     private BigDecimal deposit;
 
     @NotNull(message = "BHK is required")
@@ -40,6 +43,7 @@ public class CreateListingRequest {
 
     @NotNull(message = "Built-up area is required")
     @DecimalMin(value = "1.0", message = "Built-up area must be greater than zero")
+    @Digits(integer = 8, fraction = 2, message = "Built-up area must have at most 8 integer digits and 2 decimal places")
     private BigDecimal builtUpArea;
 
     @NotNull(message = "Floor is required")

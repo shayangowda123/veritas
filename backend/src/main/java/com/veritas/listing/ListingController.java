@@ -1,7 +1,9 @@
 package com.veritas.listing;
 
+import com.veritas.common.web.OwnerPaginationGuard;
 import com.veritas.listing.dto.CreateListingRequest;
 import com.veritas.listing.dto.ListingResponse;
+import com.veritas.listing.dto.PublishListingRequest;
 import com.veritas.listing.dto.UpdateListingRequest;
 import com.veritas.listing.dto.UpdateListingStatusRequest;
 import com.veritas.security.UserPrincipal;
@@ -17,11 +19,17 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Set;
 import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/listings")
 public class ListingController {
+
+    // Direct Listing attributes that may be sorted on by the owner "my" endpoint. Nested paths such
+    // as property.city and any non-listed field are rejected before the query is built.
+    private static final Set<String> SORTABLE_FIELDS = Set.of(
+            "createdAt", "rent", "bhk", "status", "availableFrom", "id");
 
     private final ListingService listingService;
 
@@ -35,7 +43,8 @@ public class ListingController {
             @AuthenticationPrincipal UserPrincipal principal,
             @Valid @RequestBody CreateListingRequest request
     ) {
-        ListingResponse response = listingService.createDraftListing(principal.getId(), request);
+        boolean isAdmin = principal.getRole() == UserRole.ADMIN;
+        ListingResponse response = listingService.createDraftListing(principal.getId(), isAdmin, request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
@@ -58,7 +67,8 @@ public class ListingController {
             @AuthenticationPrincipal UserPrincipal principal,
             @Valid @RequestBody UpdateListingRequest request
     ) {
-        ListingResponse response = listingService.updateListing(id, principal.getId(), request);
+        boolean isAdmin = principal.getRole() == UserRole.ADMIN;
+        ListingResponse response = listingService.updateListing(id, principal.getId(), isAdmin, request);
         return ResponseEntity.ok(response);
     }
 
@@ -66,9 +76,11 @@ public class ListingController {
     @PreAuthorize("hasRole('OWNER') or hasRole('ADMIN')")
     public ResponseEntity<ListingResponse> publishListing(
             @PathVariable UUID id,
-            @AuthenticationPrincipal UserPrincipal principal
+            @AuthenticationPrincipal UserPrincipal principal,
+            @Valid @RequestBody PublishListingRequest request
     ) {
-        ListingResponse response = listingService.publishListing(id, principal.getId());
+        boolean isAdmin = principal.getRole() == UserRole.ADMIN;
+        ListingResponse response = listingService.publishListing(id, principal.getId(), isAdmin, request.getVersion());
         return ResponseEntity.ok(response);
     }
 
@@ -79,7 +91,8 @@ public class ListingController {
             @AuthenticationPrincipal UserPrincipal principal,
             @Valid @RequestBody UpdateListingStatusRequest request
     ) {
-        ListingResponse response = listingService.updateListingStatus(id, principal.getId(), request.getStatus());
+        boolean isAdmin = principal.getRole() == UserRole.ADMIN;
+        ListingResponse response = listingService.updateListingStatus(id, principal.getId(), isAdmin, request.getStatus(), request.getVersion());
         return ResponseEntity.ok(response);
     }
 
@@ -88,9 +101,11 @@ public class ListingController {
     public ResponseEntity<Page<ListingResponse>> getMyListings(
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(required = false) ListingStatus status,
+            @RequestParam(name = "page", required = false) Integer requestedPage,
             @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
     ) {
-        Page<ListingResponse> page = listingService.getOwnerListings(principal.getId(), status, pageable);
+        Pageable safePageable = OwnerPaginationGuard.validateAndNormalize(pageable, requestedPage, SORTABLE_FIELDS);
+        Page<ListingResponse> page = listingService.getOwnerListings(principal.getId(), status, safePageable);
         return ResponseEntity.ok(page);
     }
 }

@@ -2,6 +2,7 @@ package com.veritas.auth;
 
 import com.veritas.auth.dto.LoginResponse;
 import com.veritas.common.exception.GlobalExceptionHandler;
+import com.veritas.common.exception.InvalidUserRoleException;
 import com.veritas.config.SecurityConfig;
 import com.veritas.otp.OtpService;
 import com.veritas.security.*;
@@ -143,6 +144,34 @@ class AuthControllerSecurityTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.email").value("renter@example.com"))
                 .andExpect(jsonPath("$.role").value("RENTER"));
+    }
+
+    @Test
+    @DisplayName("1b. Public ADMIN self-registration is rejected with the 400 envelope (Phase 3B.6E)")
+    void adminSelfRegistrationIsRejected() throws Exception {
+        // The service-layer policy throws InvalidUserRoleException for ADMIN; the shared handler
+        // must surface it as the unified 400 envelope with the explicit denial message.
+        when(userService.register(any()))
+                .thenThrow(new InvalidUserRoleException("Public registration cannot create an ADMIN account"));
+
+        String json = """
+                {
+                    "name": "Mallory Admin",
+                    "email": "mallory@example.com",
+                    "password": "Password123!",
+                    "confirmPassword": "Password123!",
+                    "phone": "+919876543210",
+                    "role": "ADMIN"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message")
+                        .value("Public registration cannot create an ADMIN account"));
     }
 
     @Test

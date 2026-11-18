@@ -33,7 +33,8 @@ public class PropertyImageController {
             @RequestParam("file") MultipartFile file,
             @AuthenticationPrincipal UserPrincipal principal
     ) {
-        PropertyImageResponse response = propertyImageService.uploadImage(propertyId, principal.getId(), file);
+        boolean isAdmin = principal.getRole() == UserRole.ADMIN;
+        PropertyImageResponse response = propertyImageService.uploadImage(propertyId, principal.getId(), isAdmin, file);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
@@ -56,7 +57,8 @@ public class PropertyImageController {
             @PathVariable UUID imageId,
             @AuthenticationPrincipal UserPrincipal principal
     ) {
-        propertyImageService.deleteImage(propertyId, imageId, principal.getId());
+        boolean isAdmin = principal.getRole() == UserRole.ADMIN;
+        propertyImageService.deleteImage(propertyId, imageId, principal.getId(), isAdmin);
         return ResponseEntity.noContent().build();
     }
 
